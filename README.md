@@ -10,7 +10,6 @@ Página ativa: **[https://manoelvrsilva.github.io/iptv-remote/](https://manoelvr
 - **Configuração do Servidor:** Editar URL Xtream Codes, Usuário e Senha com segurança.
 - **Gerenciamento de Categorias:** Ocultar ou exibir categorias com busca e botão de selecionar/desmarcar tudo.
 - **Backup & Restauração Versionada:** Exportar e importar configurações completas (`.json`) com fusão tolerante (Deep Merge) para futuras atualizações do app.
-- **Controle Remoto Virtual:** D-Pad de navegação, Voltar, CH+/CH- e Play/Pause diretamente pela tela do celular.
 
 ---
 
