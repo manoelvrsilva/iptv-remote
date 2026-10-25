@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>IPTV Lite - Gerenciador Mobile</title>
+    <!-- Fallback para CDN e arquivo local do PeerJS -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script>
+        if (!window.Peer) {
+            document.write('<script src="peerjs.min.js"><\/script>');
+        }
+    </script>
+    <style>
+        :root {
+            --bg-primary: #0a0f1c;
+            --bg-card: #152238;
+            --bg-card-hover: #1e3252;
+            --bg-input: #0f172a;
+            --accent-gold: #fbbf24;
+            --accent-blue: #38bdf8;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 15px;
+            line-height: 1.5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Barra de Topo */
+        header {
+            background-color: #080d19;
+            border-bottom: 1px solid var(--border-color);
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-logo {
+            font-size: 22px;
+        }
+
+        .header-title {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #ffffff;
+        }
+
+        .header-title span {
+            color: var(--accent-gold);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 12px;
+            border-radius: 9999px;
+            background-color: #1e293b;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .status-pill.connected {
+            background-color: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+            border-color: rgba(34, 197, 94, 0.4);
+        }
+
+        .status-pill.connecting {
+            background-color: rgba(56, 189, 248, 0.15);
+            color: var(--accent-blue);
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+
+        .status-pill.disconnected {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        /* Banner de Conexão Manual (caso não venha por QR code) */
+        #connect-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            margin: 16px;
+            padding: 16px;
+        }
+
+        .connect-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .connect-row input {
+            flex: 1;
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        /* Abas de Navegação */
+        nav.tab-bar {
+            display: flex;
+            background-color: #0b1324;
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            scrollbar-width: none;
+            position: sticky;
+            top: 55px;
+            z-index: 40;
+        }
+
+        nav.tab-bar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .tab-btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 12px 10px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab-btn.active {
+            color: var(--accent-gold);
+            border-bottom-color: var(--accent-gold);
+            background-color: rgba(251, 191, 36, 0.05);
+        }
+
+        .tab-icon {
+            font-size: 18px;
+        }
+
+        /* Conteúdo Principal */
+        main {
+            flex: 1;
+            padding: 16px;
+            max-width: 600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .tab-pane {
+            display: none;
+            animation: fadeIn 0.25s ease;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Cards & Formulários */
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            line-height: 1.4;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            width: 100%;
+            background-color: var(--bg-input);
+            border: 1.5px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: 15px;
+            color: #ffffff;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .password-wrap {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        /* Botões */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background-color: var(--accent-gold);
+            color: #000000;
+        }
+
+        .btn-secondary {
+            background-color: #2b3b55;
+            color: #ffffff;
+            border: 1px solid #3b4f70;
+        }
+
+        .btn-success {
+            background-color: var(--accent-green);
+            color: #ffffff;
+        }
+
+        .btn-danger {
+            background-color: var(--accent-red);
+            color: #ffffff;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        /* Lista de Categorias */
+        .search-input {
+            width: 100%;
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .cat-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background-color: #1e293b;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .cat-list-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background-color: var(--bg-input);
+        }
+
+        .cat-item-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+        }
+
+        .cat-item-row:last-child {
+            border-bottom: none;
+        }
+
+        .cat-item-name {
+            font-size: 14px;
+            color: #ffffff;
+            flex: 1;
+            padding-right: 10px;
+        }
+
+        /* Switch Toggle */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #334155;
+            transition: 0.3s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent-blue);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Controle Remoto Virtual */
+        .remote-dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 260px;
+            margin: 20px auto;
+        }
+
+        .remote-btn {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            height: 60px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .remote-btn:active {
+            background-color: var(--accent-gold);
+            color: #000000;
+            transform: scale(0.95);
+        }
+
+        .remote-btn.ok-btn {
+            background-color: #2563eb;
+            border-color: #38bdf8;
+            font-size: 16px;
+        }
+
+        .remote-actions-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .remote-action-btn {
+            flex: 1;
+            padding: 12px;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .remote-action-btn:active {
+            background-color: var(--accent-gold);
+            color: #000;
+        }
+
+        /* Toast de Feedback */
+        #mobile-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(15, 23, 42, 0.95);
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 1px solid var(--accent-gold);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Topo -->
+    <header>
+        <div class="header-brand">
+            <span class="header-logo">📺</span>
+            <div class="header-title">IPTV<span>Lite</span> Remote</div>
+        </div>
+        <div id="status-pill" class="status-pill disconnected">
+            <span class="status-dot"></span>
+            <span id="status-text">Desconectado</span>
+        </div>
+    </header>
+
+    <!-- Card de Conexão Manual (caso abra o link sem QR Code) -->
+    <div id="connect-card" style="display: none;">
+        <div class="card-title">🔗 Conectar à Smart TV</div>
+        <div class="card-desc">Digite o ID da sessão e o PIN de 4 dígitos exibidos na tela da TV:</div>
+        <div class="connect-row">
+            <input type="text" id="input-session-id" placeholder="ID (ex: tv-8f92a1)" autocomplete="off">
+            <input type="number" id="input-session-pin" placeholder="PIN" style="max-width: 90px;" autocomplete="off">
+            <button class="btn btn-primary" id="btn-manual-connect" style="width: auto; padding: 10px 16px;">Ligar</button>
+        </div>
+    </div>
+
+    <!-- Barra de Abas -->
+    <nav class="tab-bar">
+        <button class="tab-btn active" data-tab="server">
+            <span class="tab-icon">🌐</span>
+            <span>Servidor</span>
+        </button>
+        <button class="tab-btn" data-tab="categories">
+            <span class="tab-icon">👁️</span>
+            <span>Categorias</span>
+        </button>
+        <button class="tab-btn" data-tab="backup">
+            <span class="tab-icon">💾</span>
+            <span>Backup</span>
+        </button>
+        <button class="tab-btn" data-tab="remote">
+            <span class="tab-icon">🎮</span>
+            <span>Controle</span>
+        </button>
+    </nav>
+
+    <!-- Conteúdo das Abas -->
+    <main>
+
+        <!-- ABA 1: SERVIDOR & CREDENCIAIS -->
+        <div id="tab-server" class="tab-pane active">
+            <div class="card">
+                <div class="card-title">🌐 Servidor Xtream Codes</div>
+                <div class="card-desc">Edite o link e credenciais do seu provedor IPTV e envie diretamente para a TV.</div>
+
+                <div class="form-group">
+                    <label class="form-label">URL do Servidor / DNS</label>
+                    <input type="text" id="srv-url" class="form-input" placeholder="http://exemplo.site:80" autocomplete="off" spellcheck="false">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Nome de Usuário</label>
+                    <input type="text" id="srv-user" class="form-input" placeholder="Seu usuário" autocomplete="off" spellcheck="false">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Senha</label>
+                    <div class="password-wrap">
+                        <input type="password" id="srv-pass" class="form-input" placeholder="Sua senha" autocomplete="off">
+                        <button type="button" class="password-toggle" id="btn-toggle-pass">👁️</button>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="btn-test-server">🔍 Testar Conta</button>
+                    <button class="btn btn-primary" id="btn-save-server">🚀 Salvar na TV</button>
+                </div>
+                <div id="server-test-result" style="margin-top: 12px; font-size: 13px; font-weight: 600; display: none;"></div>
+            </div>
+        </div>
+
+        <!-- ABA 2: CATEGORIAS VISÍVEIS -->
+        <div id="tab-categories" class="tab-pane">
+            <div class="card">
+                <div class="card-title">👁️ Categorias de TV ao Vivo</div>
+                <div class="card-desc">Marque as categorias que deseja exibir. Desmarcadas não aparecerão na TV nem em "Todos os Canais".</div>
+
+                <input type="text" id="cat-search" class="search-input" placeholder="🔍 Filtrar categorias...">
+
+                <div class="cat-toolbar">
+                    <span id="cat-count-summary">Carregando categorias...</span>
+                    <button id="btn-toggle-all-cats" class="btn btn-secondary" style="width: auto; padding: 4px 10px; font-size: 12px;">Alternar Todas</button>
+                </div>
+
+                <div id="cat-list-box" class="cat-list-container">
+                    <div style="padding: 20px; text-align: center; color: var(--text-muted);">
+                        Aguardando dados da TV...
+                    </div>
+                </div>
+
+                <div style="margin-top: 14px;">
+                    <button class="btn btn-primary" id="btn-save-categories">Salvar Categorias na TV</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ABA 3: BACKUP & RESTAURAÇÃO -->
+        <div id="tab-backup" class="tab-pane">
+            <div class="card">
+                <div class="card-title">⬇️ Exportar Backup Completo</div>
+                <div class="card-desc">Baixe um arquivo <code>.json</code> contendo todo o estado da sua TV (credenciais, categorias ocultas, resoluções de canais e configurações).</div>
+                <button class="btn btn-secondary" id="btn-export-backup">💾 Baixar Arquivo de Backup (.json)</button>
+            </div>
+
+            <div class="card">
+                <div class="card-title">⬆️ Restaurar Backup na TV</div>
+                <div class="card-desc">Envie um arquivo <code>.json</code> previamente exportado para restaurar tudo na sua Smart TV automaticamente.</div>
+                
+                <input type="file" id="file-import-backup" accept=".json" style="display: none;">
+                <button class="btn btn-primary" id="btn-trigger-import">📂 Escolher Arquivo .json</button>
+
+                <div id="import-summary-box" style="display: none; margin-top: 14px; padding: 12px; background-color: var(--bg-input); border-radius: 8px; font-size: 13px;">
+                    <div style="font-weight: bold; margin-bottom: 6px;">Arquivo pronto para envio:</div>
+                    <div id="import-summary-text" style="color: var(--text-muted); line-height: 1.6;"></div>
+                    <button class="btn btn-success" id="btn-confirm-import" style="margin-top: 10px;">Confirmar e Enviar para a TV</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ABA 4: CONTROLE REMOTO VIRTUAL -->
+        <div id="tab-remote" class="tab-pane">
+            <div class="card" style="text-align: center;">
+                <div class="card-title" style="justify-content: center;">🎮 Controle Remoto D-Pad</div>
+                <div class="card-desc">Controle a interface da Smart TV diretamente pelo celular.</div>
+
+                <div class="remote-dpad">
+                    <div></div>
+                    <button class="remote-btn" data-key="38">▲</button>
+                    <div></div>
+
+                    <button class="remote-btn" data-key="37">◀</button>
+                    <button class="remote-btn ok-btn" data-key="13">OK</button>
+                    <button class="remote-btn" data-key="39">▶</button>
+
+                    <div></div>
+                    <button class="remote-btn" data-key="40">▼</button>
+                    <div></div>
+                </div>
+
+                <div class="remote-actions-row">
+                    <button class="remote-action-btn" data-key="10009">↩ Voltar</button>
+                    <button class="remote-action-btn" data-key="427">CH +</button>
+                    <button class="remote-action-btn" data-key="428">CH -</button>
+                    <button class="remote-action-btn" data-key="10252">⏯ Play</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Toast de Notificações -->
+    <div id="mobile-toast"></div>
+
+    <script>
+        // Estado do Aplicativo Mobile
+        let peer = null;
+        let tvConn = null;
+        let isConnected = false;
+        let targetTvId = '';
+        let targetSecurityPin = '';
+
+        // Snapshot sincronizado da TV
+        let tvData = {
+            config: {},
+            settings: {},
+            hidden_categories: [],
+            custom_qualities: {},
+            favorites: [],
+            server_categories: []
+        };
+
+        let parsedImportBackup = null;
+
+        // Inicialização
+        window.onload = function () {
+            parseUrlParams();
+            setupTabs();
+            setupEventListeners();
+            initPeerConnection();
+        };
+
+        function parseUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const idParam = urlParams.get('id');
+            const pinParam = urlParams.get('pin');
+
+            if (idParam) {
+                targetTvId = idParam.trim();
+                document.getElementById('input-session-id').value = targetTvId;
+            }
+            if (pinParam) {
+                targetSecurityPin = pinParam.trim();
+                document.getElementById('input-session-pin').value = targetSecurityPin;
+            }
+
+            if (!targetTvId) {
+                document.getElementById('connect-card').style.display = 'block';
+            }
+        }
+
+        function setupTabs() {
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            tabBtns.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const tabKey = this.getAttribute('data-tab');
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+                    this.classList.add('active');
+                    const targetPane = document.getElementById('tab-' + tabKey);
+                    if (targetPane) targetPane.classList.add('active');
+                });
+            });
+        }
+
+        function setupEventListeners() {
+            // Alternar visibilidade de senha
+            document.getElementById('btn-toggle-pass').addEventListener('click', function () {
+                const passInput = document.getElementById('srv-pass');
+                if (passInput.type === 'password') {
+                    passInput.type = 'text';
+                    this.textContent = '🔒';
+                } else {
+                    passInput.type = 'password';
+                    this.textContent = '👁️';
+                }
+            });
+
+            // Conexão manual
+            document.getElementById('btn-manual-connect').addEventListener('click', function () {
+                targetTvId = document.getElementById('input-session-id').value.trim();
+                targetSecurityPin = document.getElementById('input-session-pin').value.trim();
+                if (!targetTvId) {
+                    showToast('Digite o ID da sessão da TV');
+                    return;
+                }
+                connectToTv();
+            });
+
+            // Salvar Servidor na TV
+            document.getElementById('btn-save-server').addEventListener('click', function () {
+                if (!isConnected) {
+                    showToast('TV não conectada!');
+                    return;
+                }
+                const srv = document.getElementById('srv-url').value.trim();
+                const usr = document.getElementById('srv-user').value.trim();
+                const pwd = document.getElementById('srv-pass').value.trim();
+
+                if (!srv || !usr || !pwd) {
+                    showToast('Preencha URL, Usuário e Senha');
+                    return;
+                }
+
+                sendToTv('UPDATE_SERVER', {
+                    server: srv,
+                    username: usr,
+                    password: pwd
+                });
+                showToast('Credenciais enviadas para a TV!');
+            });
+
+            // Testar Servidor no Celular
+            document.getElementById('btn-test-server').addEventListener('click', testServerCredentials);
+
+            // Filtro de Categorias
+            document.getElementById('cat-search').addEventListener('input', function (e) {
+                filterCategories(e.target.value.toLowerCase());
+            });
+
+            // Alternar todas categorias
+            document.getElementById('btn-toggle-all-cats').addEventListener('click', toggleAllCategories);
+
+            // Salvar Categorias na TV
+            document.getElementById('btn-save-categories').addEventListener('click', function () {
+                if (!isConnected) {
+                    showToast('TV não conectada!');
+                    return;
+                }
+                sendToTv('UPDATE_CATEGORIES', {
+                    hidden_categories: tvData.hidden_categories
+                });
+                showToast('Categorias atualizadas na TV!');
+            });
+
+            // Exportar Backup
+            document.getElementById('btn-export-backup').addEventListener('click', exportBackupJson);
+
+            // Gatilho de Importação
+            document.getElementById('btn-trigger-import').addEventListener('click', function () {
+                document.getElementById('file-import-backup').click();
+            });
+
+            document.getElementById('file-import-backup').addEventListener('change', handleFileImport);
+            document.getElementById('btn-confirm-import').addEventListener('click', sendImportToTv);
+
+            // Controle Remoto D-Pad
+            document.querySelectorAll('.remote-btn, .remote-action-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const key = parseInt(this.getAttribute('data-key'), 10);
+                    if (key) {
+                        sendToTv('VIRTUAL_KEY', { keyCode: key });
+                    }
+                });
+            });
+        }
+
+        // -------------------------------------------------------------
+        // WebRTC P2P (PeerJS)
+        // -------------------------------------------------------------
+        function initPeerConnection() {
+            updateStatus('connecting', 'Iniciando...');
+            try {
+                // Cria peer aleatório para o celular
+                peer = new Peer(null, {
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:global.stun.twilio.com:3478' }
+                        ]
+                    }
+                });
+
+                peer.on('open', function (id) {
+                    if (targetTvId) {
+                        connectToTv();
+                    } else {
+                        updateStatus('disconnected', 'Aguardando ID');
+                    }
+                });
+
+                peer.on('error', function (err) {
+                    console.error('PeerJS error:', err);
+                    updateStatus('disconnected', 'Erro na conexão');
+                });
+            } catch (e) {
+                updateStatus('disconnected', 'Falha ao iniciar WebRTC');
+            }
+        }
+
+        function connectToTv() {
+            if (!peer || !targetTvId) return;
+            updateStatus('connecting', 'Conectando à TV...');
+
+            try {
+                tvConn = peer.connect(targetTvId, {
+                    reliable: true
+                });
+
+                tvConn.on('open', function () {
+                    // Envia Handshake com o PIN de segurança
+                    tvConn.send({
+                        type: 'HANDSHAKE',
+                        pin: targetSecurityPin
+                    });
+                });
+
+                tvConn.on('data', function (data) {
+                    handleTvMessage(data);
+                });
+
+                tvConn.on('close', function () {
+                    isConnected = false;
+                    updateStatus('disconnected', 'Desconectado da TV');
+                });
+
+                tvConn.on('error', function () {
+                    isConnected = false;
+                    updateStatus('disconnected', 'Falha ao parear');
+                });
+            } catch (e) {
+                updateStatus('disconnected', 'Erro de conexão');
+            }
+        }
+
+        function handleTvMessage(msg) {
+            if (!msg || !msg.type) return;
+
+            switch (msg.type) {
+                case 'HANDSHAKE_OK':
+                    isConnected = true;
+                    updateStatus('connected', '🟢 Conectado à TV');
+                    showToast('Pareamento com a TV confirmado!');
+                    document.getElementById('connect-card').style.display = 'none';
+                    break;
+
+                case 'HANDSHAKE_FAILED':
+                    isConnected = false;
+                    updateStatus('disconnected', 'PIN incorreto');
+                    showToast('PIN de segurança incorreto na TV');
+                    document.getElementById('connect-card').style.display = 'block';
+                    break;
+
+                case 'SNAPSHOT':
+                    // Dados completos recebidos da TV
+                    tvData = msg.payload || {};
+                    populateFormWithSnapshot();
+                    break;
+
+                case 'ACTION_ACK':
+                    showToast(msg.message || 'Comando executado na TV!');
+                    break;
+            }
+        }
+
+        function sendToTv(type, payload) {
+            if (!tvConn || !isConnected) {
+                showToast('TV não conectada');
+                return;
+            }
+            tvConn.send({
+                type: type,
+                payload: payload
+            });
+        }
+
+        function updateStatus(state, text) {
+            const pill = document.getElementById('status-pill');
+            const txt = document.getElementById('status-text');
+            pill.className = 'status-pill ' + state;
+            txt.textContent = text;
+        }
+
+        // -------------------------------------------------------------
+        // Preenchimento e UI
+        // -------------------------------------------------------------
+        function populateFormWithSnapshot() {
+            if (tvData.config) {
+                document.getElementById('srv-url').value = tvData.config.server || '';
+                document.getElementById('srv-user').value = tvData.config.username || '';
+                document.getElementById('srv-pass').value = tvData.config.password || '';
+            }
+            renderCategoriesList();
+        }
+
+        function renderCategoriesList() {
+            const container = document.getElementById('cat-list-box');
+            const cats = tvData.server_categories || [];
+            const hidden = tvData.hidden_categories || [];
+
+            if (cats.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">Nenhuma categoria recebida da TV</div>';
+                document.getElementById('cat-count-summary').textContent = '0 categorias';
+                return;
+            }
+
+            const visibleCount = cats.length - hidden.length;
+            document.getElementById('cat-count-summary').textContent = visibleCount + ' visíveis de ' + cats.length;
+
+            let html = '';
+            cats.forEach(function (c) {
+                const cid = String(c.category_id);
+                const isChecked = !hidden.includes(cid);
+                html += `
+                    <div class="cat-item-row" data-name="${(c.category_name || '').toLowerCase()}" data-id="${cid}">
+                        <span class="cat-item-name">${c.category_name || ('Cat ' + cid)}</span>
+                        <label class="switch">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="onCategoryToggle('${cid}', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        window.onCategoryToggle = function (catId, isChecked) {
+            if (!tvData.hidden_categories) tvData.hidden_categories = [];
+            const idx = tvData.hidden_categories.indexOf(catId);
+            if (isChecked && idx !== -1) {
+                tvData.hidden_categories.splice(idx, 1);
+            } else if (!isChecked && idx === -1) {
+                tvData.hidden_categories.push(catId);
+            }
+            const total = (tvData.server_categories || []).length;
+            const vis = total - tvData.hidden_categories.length;
+            document.getElementById('cat-count-summary').textContent = vis + ' visíveis de ' + total;
+        };
+
+        function filterCategories(query) {
+            const rows = document.querySelectorAll('.cat-item-row');
+            rows.forEach(function (row) {
+                const name = row.getAttribute('data-name');
+                row.style.display = (!query || name.includes(query)) ? 'flex' : 'none';
+            });
+        }
+
+        function toggleAllCategories() {
+            const cats = tvData.server_categories || [];
+            if (!tvData.hidden_categories) tvData.hidden_categories = [];
+
+            if (tvData.hidden_categories.length === 0) {
+                // Se todas estão visíveis, oculta todas
+                tvData.hidden_categories = cats.map(c => String(c.category_id));
+            } else {
+                // Caso contrário, torna todas visíveis
+                tvData.hidden_categories = [];
+            }
+            renderCategoriesList();
+        }
+
+        // Testar credenciais diretamente pelo navegador do celular
+        async function testServerCredentials() {
+            const srv = document.getElementById('srv-url').value.trim().replace(/\/+$/, '');
+            const usr = document.getElementById('srv-user').value.trim();
+            const pwd = document.getElementById('srv-pass').value.trim();
+            const resultEl = document.getElementById('server-test-result');
+
+            if (!srv || !usr || !pwd) {
+                showToast('Preencha os campos para testar');
+                return;
+            }
+
+            resultEl.style.display = 'block';
+            resultEl.style.color = '#38bdf8';
+            resultEl.textContent = 'Conectando ao servidor...';
+
+            const testUrl = srv + '/player_api.php?username=' + encodeURIComponent(usr) + '&password=' + encodeURIComponent(pwd);
+            try {
+                const res = await fetch(testUrl);
+                const data = await res.json();
+                if (data && data.user_info && data.user_info.auth === 1) {
+                    const status = data.user_info.status || 'Ativo';
+                    const exp = data.user_info.exp_date ? new Date(parseInt(data.user_info.exp_date, 10) * 1000).toLocaleDateString('pt-BR') : 'Sem data';
+                    resultEl.style.color = '#22c55e';
+                    resultEl.textContent = '✓ Conta Válida! Status: ' + status + ' • Vencimento: ' + exp;
+                } else {
+                    resultEl.style.color = '#ef4444';
+                    resultEl.textContent = '✗ Usuário ou senha incorretos.';
+                }
+            } catch (e) {
+                resultEl.style.color = '#fbbf24';
+                resultEl.textContent = '⚠️ Não foi possível consultar diretamente pelo navegador (bloqueio CORS/HTTPS). A TV conseguirá conectar normalmente.';
+            }
+        }
+
+        // -------------------------------------------------------------
+        // Backup: Exportação e Importação Versionada
+        // -------------------------------------------------------------
+        function exportBackupJson() {
+            const backupObject = {
+                app: "IPTV Lite Samsung Tizen",
+                version: 1,
+                exported_at: new Date().toISOString(),
+                config: tvData.config || {},
+                settings: tvData.settings || {},
+                hidden_categories: tvData.hidden_categories || [],
+                custom_qualities: tvData.custom_qualities || {},
+                favorites: tvData.favorites || []
+            };
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObject, null, 2));
+            const downloadAnchor = document.createElement('a');
+            const dateStr = new Date().toISOString().slice(0, 10);
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "iptv_lite_backup_" + dateStr + ".json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            showToast('Backup baixado com sucesso!');
+        }
+
+        function handleFileImport(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                try {
+                    const parsed = JSON.parse(event.target.result);
+                    if (!parsed || typeof parsed !== 'object') {
+                        throw new Error('Formato inválido');
+                    }
+                    parsedImportBackup = parsed;
+
+                    // Exibe resumo
+                    const summaryBox = document.getElementById('import-summary-box');
+                    const summaryText = document.getElementById('import-summary-text');
+                    const favCount = Array.isArray(parsed.favorites) ? parsed.favorites.length : 0;
+                    const hiddenCount = Array.isArray(parsed.hidden_categories) ? parsed.hidden_categories.length : 0;
+                    const customQCount = parsed.custom_qualities ? Object.keys(parsed.custom_qualities).length : 0;
+                    const serverUrl = parsed.config && parsed.config.server ? parsed.config.server : 'Não incluso';
+
+                    summaryText.innerHTML = `
+                        • Versão do Backup: ${parsed.version || 1}<br>
+                        • Servidor: <strong>${serverUrl}</strong><br>
+                        • Favoritos: <strong>${favCount}</strong><br>
+                        • Categorias Ocultas: <strong>${hiddenCount}</strong><br>
+                        • Canais com Resolução Personalizada: <strong>${customQCount}</strong>
+                    `;
+                    summaryBox.style.display = 'block';
+                } catch (err) {
+                    showToast('Erro: Arquivo .json inválido');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function sendImportToTv() {
+            if (!isConnected) {
+                showToast('TV não conectada!');
+                return;
+            }
+            if (!parsedImportBackup) {
+                showToast('Nenhum arquivo carregado');
+                return;
+            }
+
+            sendToTv('RESTORE_BACKUP', parsedImportBackup);
+            showToast('Backup enviado para a Smart TV!');
+            document.getElementById('import-summary-box').style.display = 'none';
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('mobile-toast');
+            t.textContent = msg;
+            t.style.display = 'block';
+            clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => {
+                t.style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
+
