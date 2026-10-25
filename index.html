@@ -768,9 +768,17 @@
             eventSource.onmessage = function (e) {
                 try {
                     const parsed = JSON.parse(e.data);
-                    if (parsed.event === 'message' && parsed.message) {
-                        const msg = JSON.parse(parsed.message);
-                        handleTvMessage(msg);
+                    if (parsed.event === 'message') {
+                        if (parsed.attachment && parsed.attachment.url) {
+                            fetch(parsed.attachment.url)
+                                .then(res => res.text())
+                                .then(txt => processIncomingTvData(txt))
+                                .catch(err => console.error('[Mobile] Erro ao baixar anexo ntfy:', err));
+                            return;
+                        }
+                        if (parsed.message) {
+                            processIncomingTvData(parsed.message);
+                        }
                     }
                 } catch (err) {
                     console.error('[Mobile] Erro ao processar mensagem da TV:', err);
@@ -784,26 +792,113 @@
             };
         }
 
+        const mobileChunkBuffer = {};
+
+        function processIncomingTvData(raw) {
+            let dataObj;
+            try {
+                dataObj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            } catch (e) {
+                console.error('[Mobile] Erro ao parsear JSON recebido da TV:', e);
+                return;
+            }
+
+            if (dataObj && dataObj._chunk) {
+                handleIncomingChunk(dataObj);
+                return;
+            }
+
+            handleTvMessage(dataObj);
+        }
+
+        function handleIncomingChunk(chunk) {
+            const id = chunk.chunk_id;
+            if (!id || typeof chunk.chunk_index !== 'number' || !chunk.chunk_total) return;
+
+            if (!mobileChunkBuffer[id]) {
+                mobileChunkBuffer[id] = {
+                    total: chunk.chunk_total,
+                    received: 0,
+                    parts: new Array(chunk.chunk_total),
+                    timer: setTimeout(function () {
+                        delete mobileChunkBuffer[id];
+                    }, 30000)
+                };
+            }
+
+            const entry = mobileChunkBuffer[id];
+            if (typeof entry.parts[chunk.chunk_index] === 'undefined') {
+                entry.parts[chunk.chunk_index] = chunk.chunk_data || '';
+                entry.received++;
+            }
+
+            if (entry.received >= entry.total) {
+                clearTimeout(entry.timer);
+                const fullString = entry.parts.join('');
+                delete mobileChunkBuffer[id];
+                try {
+                    const fullMsg = JSON.parse(fullString);
+                    handleTvMessage(fullMsg);
+                } catch (err) {
+                    console.error('[Mobile] Erro ao reconstruir chunk recebido da TV:', err);
+                }
+            }
+        }
+
         function sendHandshake() {
             sendToTv('HANDSHAKE', { pin: targetSecurityPin });
         }
 
         async function sendToTv(type, payload) {
             if (!targetTvId) return;
-            const msg = JSON.stringify({
+            const bodyObj = {
                 type: type,
                 payload: payload,
                 sent_at: Date.now()
-            });
+            };
+            await sendRelayPayload('https://ntfy.sh/' + encodeURIComponent(targetTvId), bodyObj);
+        }
 
-            try {
-                await fetch('https://ntfy.sh/' + encodeURIComponent(targetTvId), {
-                    method: 'POST',
-                    body: msg,
-                    headers: { 'Content-Type': 'text/plain' }
-                });
-            } catch (err) {
-                console.error('[Mobile] Erro ao enviar mensagem para TV:', err);
+        async function sendRelayPayload(url, bodyObj) {
+            const rawString = JSON.stringify(bodyObj);
+            const CHUNK_SIZE = 2800; // Limite seguro abaixo de 4096 bytes do ntfy
+
+            if (rawString.length <= CHUNK_SIZE) {
+                try {
+                    await fetch(url, {
+                        method: 'POST',
+                        body: rawString,
+                        headers: { 'Content-Type': 'text/plain' }
+                    });
+                } catch (err) {
+                    console.error('[Mobile] Erro ao enviar mensagem para TV:', err);
+                }
+                return;
+            }
+
+            const totalChunks = Math.ceil(rawString.length / CHUNK_SIZE);
+            const chunkId = 'c_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+
+            for (let i = 0; i < totalChunks; i++) {
+                const chunkItem = {
+                    _chunk: true,
+                    chunk_id: chunkId,
+                    chunk_index: i,
+                    chunk_total: totalChunks,
+                    chunk_data: rawString.substr(i * CHUNK_SIZE, CHUNK_SIZE)
+                };
+                try {
+                    await fetch(url, {
+                        method: 'POST',
+                        body: JSON.stringify(chunkItem),
+                        headers: { 'Content-Type': 'text/plain' }
+                    });
+                    if (i < totalChunks - 1) {
+                        await new Promise(r => setTimeout(r, 60));
+                    }
+                } catch (err) {
+                    console.error('[Mobile] Erro ao enviar chunk ' + i + ':', err);
+                }
             }
         }
 
@@ -989,6 +1084,14 @@
         // Backup: Exportação e Importação Versionada
         // -------------------------------------------------------------
         function exportBackupJson() {
+            if (!isConnected) {
+                showToast('TV não conectada! Aguarde sincronizar.');
+                return;
+            }
+            if (!tvData || (!tvData.config && (!tvData.favorites || tvData.favorites.length === 0) && (!tvData.hidden_categories || tvData.hidden_categories.length === 0))) {
+                showToast('Aguardando dados da TV carregarem...');
+                return;
+            }
             const backupObject = {
                 app: "IPTV Lite Samsung Tizen",
                 version: 1,
