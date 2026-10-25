@@ -832,22 +832,33 @@
         // -------------------------------------------------------------
         // WebRTC P2P (PeerJS)
         // -------------------------------------------------------------
+        let retryCount = 0;
+        let retryTimer = null;
+        const MAX_RETRIES = 5;
+
         function initPeerConnection() {
-            updateStatus('connecting', 'Iniciando...');
+            updateStatus('connecting', 'Iniciando WebRTC...');
             try {
-                // Cria peer aleatório para o celular
+                if (peer) {
+                    try { peer.destroy(); } catch (e) {}
+                    peer = null;
+                }
+
                 peer = new Peer(null, {
                     debug: 1,
                     config: {
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' },
                             { urls: 'stun:global.stun.twilio.com:3478' }
                         ]
                     }
                 });
 
                 peer.on('open', function (id) {
+                    console.log('[Mobile] Peer aberto com ID:', id);
                     if (targetTvId) {
+                        retryCount = 0;
                         connectToTv();
                     } else {
                         updateStatus('disconnected', 'Aguardando ID');
@@ -855,8 +866,16 @@
                 });
 
                 peer.on('error', function (err) {
-                    console.error('PeerJS error:', err);
-                    updateStatus('disconnected', 'Erro na conexão');
+                    console.error('[Mobile] PeerJS error:', err);
+                    const errType = err && (err.type || err.message || err);
+                    if (errType === 'peer-unavailable' && retryCount < MAX_RETRIES) {
+                        retryCount++;
+                        updateStatus('connecting', 'Aguardando a TV se registrar na rede (' + retryCount + '/' + MAX_RETRIES + ')...');
+                        clearTimeout(retryTimer);
+                        retryTimer = setTimeout(connectToTv, 2000);
+                    } else {
+                        updateStatus('disconnected', 'Erro: ' + errType);
+                    }
                 });
             } catch (e) {
                 updateStatus('disconnected', 'Falha ao iniciar WebRTC');
@@ -865,15 +884,25 @@
 
         function connectToTv() {
             if (!peer || !targetTvId) return;
-            updateStatus('connecting', 'Conectando à TV...');
+            if (isConnected) return;
+
+            updateStatus('connecting', 'Conectando à TV' + (retryCount > 0 ? ' (' + retryCount + '/' + MAX_RETRIES + ')...' : '...'));
 
             try {
+                if (tvConn) {
+                    try { tvConn.close(); } catch (e) {}
+                    tvConn = null;
+                }
+
                 tvConn = peer.connect(targetTvId, {
-                    reliable: true
+                    reliable: true,
+                    serialization: 'json'
                 });
 
                 tvConn.on('open', function () {
-                    // Envia Handshake com o PIN de segurança
+                    console.log('[Mobile] Conexão aberta com a TV! Enviando handshake...');
+                    retryCount = 0;
+                    clearTimeout(retryTimer);
                     tvConn.send({
                         type: 'HANDSHAKE',
                         pin: targetSecurityPin
@@ -889,12 +918,20 @@
                     updateStatus('disconnected', 'Desconectado da TV');
                 });
 
-                tvConn.on('error', function () {
+                tvConn.on('error', function (err) {
+                    console.error('[Mobile] Erro tvConn:', err);
                     isConnected = false;
-                    updateStatus('disconnected', 'Falha ao parear');
+                    if (retryCount < MAX_RETRIES) {
+                        retryCount++;
+                        updateStatus('connecting', 'Aguardando TV... Retentando em 2s (' + retryCount + '/' + MAX_RETRIES + ')');
+                        clearTimeout(retryTimer);
+                        retryTimer = setTimeout(connectToTv, 2000);
+                    } else {
+                        updateStatus('disconnected', 'Falha ao parear: Verifique se a tela está aberta na TV');
+                    }
                 });
             } catch (e) {
-                updateStatus('disconnected', 'Erro de conexão');
+                updateStatus('disconnected', 'Erro de conexão: ' + e.message);
             }
         }
 
