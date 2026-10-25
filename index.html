@@ -550,6 +550,15 @@
 
         <!-- ABA 3: BACKUP & RESTAURAÇÃO -->
         <div id="tab-backup" class="tab-pane">
+            <div class="card" id="card-sync-overview">
+                <div class="card-title">📊 Dados Sincronizados da TV</div>
+                <div id="sync-stats-box" style="margin-top: 10px; font-size: 14px; line-height: 1.8; color: var(--text-main);">
+                    • Servidor: <strong id="stat-server">Aguardando TV...</strong><br>
+                    • Canais Favoritos: <strong id="stat-favs" style="color: var(--accent-gold);">0 salvos</strong><br>
+                    • Categorias Recebidas: <strong id="stat-cats">0</strong>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-title">⬇️ Exportar Backup Completo</div>
                 <div class="card-desc">Baixe um arquivo <code>.json</code> contendo todo o estado da sua TV (credenciais, categorias ocultas, resoluções de canais e configurações).</div>
@@ -808,6 +817,12 @@
                     updateStatus('connected', '🟢 Conectado à TV');
                     showToast('Pareamento confirmado com a Smart TV!');
                     document.getElementById('connect-card').style.display = 'none';
+                    if (msg.payload) {
+                        tvData = msg.payload;
+                        populateFormWithSnapshot();
+                    } else {
+                        sendToTv('REQUEST_SNAPSHOT');
+                    }
                     break;
 
                 case 'HANDSHAKE_FAILED':
@@ -849,6 +864,24 @@
                 document.getElementById('srv-pass').value = tvData.config.password || '';
             }
             renderCategoriesList();
+            renderSyncOverview();
+        }
+
+        function renderSyncOverview() {
+            const statServer = document.getElementById('stat-server');
+            const statFavs = document.getElementById('stat-favs');
+            const statCats = document.getElementById('stat-cats');
+            if (statServer) {
+                statServer.textContent = (tvData.config && tvData.config.server) ? tvData.config.server : 'Não configurado';
+            }
+            if (statFavs) {
+                const favCount = Array.isArray(tvData.favorites) ? tvData.favorites.length : 0;
+                statFavs.textContent = favCount + ' canais salvos';
+            }
+            if (statCats) {
+                const catCount = Array.isArray(tvData.server_categories) ? tvData.server_categories.length : 0;
+                statCats.textContent = catCount + ' categorias';
+            }
         }
 
         function renderCategoriesList() {
