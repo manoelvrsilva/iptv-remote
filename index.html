@@ -4,13 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>IPTV Lite - Gerenciador Mobile</title>
-    <!-- Fallback para CDN e arquivo local do PeerJS -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    <script>
-        if (!window.Peer) {
-            document.write('<script src="peerjs.min.js"><\/script>');
-        }
-    </script>
     <style>
         :root {
             --bg-primary: #0a0f1c;
@@ -118,7 +111,7 @@
             background-color: currentColor;
         }
 
-        /* Banner de Conexão Manual (caso não venha por QR code) */
+        /* Banner de Conexão Manual */
         #connect-card {
             background-color: var(--bg-card);
             border: 1px solid var(--border-color);
@@ -527,7 +520,7 @@
         </div>
     </header>
 
-    <!-- Card de Conexão Manual (caso abra o link sem QR Code) -->
+    <!-- Card de Conexão Manual -->
     <div id="connect-card" style="display: none;">
         <div class="card-title">🔗 Conectar à Smart TV</div>
         <div class="card-desc">Digite o ID da sessão e o PIN de 4 dígitos exibidos na tela da TV:</div>
@@ -676,12 +669,12 @@
     <div id="mobile-toast"></div>
 
     <script>
-        // Estado do Aplicativo Mobile
-        let peer = null;
-        let tvConn = null;
+        // Estado da Comunicação
+        let eventSource = null;
         let isConnected = false;
         let targetTvId = '';
         let targetSecurityPin = '';
+        let handshakeInterval = null;
 
         // Snapshot sincronizado da TV
         let tvData = {
@@ -700,12 +693,14 @@
             parseUrlParams();
             setupTabs();
             setupEventListeners();
-            initPeerConnection();
+            if (targetTvId) {
+                startChannelConnection();
+            }
         };
 
         function parseUrlParams() {
             const urlParams = new URLSearchParams(window.location.search);
-            const idParam = urlParams.get('id');
+            const idParam = urlParams.get('id') || urlParams.get('channel');
             const pinParam = urlParams.get('pin');
 
             if (idParam) {
@@ -758,7 +753,7 @@
                     showToast('Digite o ID da sessão da TV');
                     return;
                 }
-                connectToTv();
+                startChannelConnection();
             });
 
             // Salvar Servidor na TV
@@ -830,108 +825,78 @@
         }
 
         // -------------------------------------------------------------
-        // WebRTC P2P (PeerJS)
+        // Conexão Instantânea Bidirecional (SSE / HTTPS Relay)
         // -------------------------------------------------------------
-        let retryCount = 0;
-        let retryTimer = null;
-        const MAX_RETRIES = 5;
+        function startChannelConnection() {
+            if (!targetTvId) return;
+            updateStatus('connecting', 'Conectando à TV...');
 
-        function initPeerConnection() {
-            updateStatus('connecting', 'Iniciando WebRTC...');
-            try {
-                if (peer) {
-                    try { peer.destroy(); } catch (e) {}
-                    peer = null;
-                }
-
-                peer = new Peer(null, {
-                    debug: 1,
-                    config: {
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' },
-                            { urls: 'stun:global.stun.twilio.com:3478' }
-                        ]
-                    }
-                });
-
-                peer.on('open', function (id) {
-                    console.log('[Mobile] Peer aberto com ID:', id);
-                    if (targetTvId) {
-                        retryCount = 0;
-                        connectToTv();
-                    } else {
-                        updateStatus('disconnected', 'Aguardando ID');
-                    }
-                });
-
-                peer.on('error', function (err) {
-                    console.error('[Mobile] PeerJS error:', err);
-                    const errType = err && (err.type || err.message || err);
-                    if (errType === 'peer-unavailable' && retryCount < MAX_RETRIES) {
-                        retryCount++;
-                        updateStatus('connecting', 'Aguardando a TV se registrar na rede (' + retryCount + '/' + MAX_RETRIES + ')...');
-                        clearTimeout(retryTimer);
-                        retryTimer = setTimeout(connectToTv, 2000);
-                    } else {
-                        updateStatus('disconnected', 'Erro: ' + errType);
-                    }
-                });
-            } catch (e) {
-                updateStatus('disconnected', 'Falha ao iniciar WebRTC');
+            if (eventSource) {
+                try { eventSource.close(); } catch (e) {}
+                eventSource = null;
             }
+            if (handshakeInterval) {
+                clearInterval(handshakeInterval);
+                handshakeInterval = null;
+            }
+
+            // O celular escuta as respostas da TV no tópico: targetTvId + "-resp"
+            const mobileListenUrl = 'https://ntfy.sh/' + encodeURIComponent(targetTvId) + '-resp/sse';
+            eventSource = new EventSource(mobileListenUrl);
+
+            eventSource.onopen = function () {
+                console.log('[Mobile] Canal de escuta aberto. Enviando Handshake...');
+                // Dispara handshake inicial
+                sendHandshake();
+                // Tenta handshake a cada 2s até a TV responder
+                handshakeInterval = setInterval(function () {
+                    if (!isConnected) {
+                        sendHandshake();
+                    } else {
+                        clearInterval(handshakeInterval);
+                    }
+                }, 2000);
+            };
+
+            eventSource.onmessage = function (e) {
+                try {
+                    const parsed = JSON.parse(e.data);
+                    if (parsed.event === 'message' && parsed.message) {
+                        const msg = JSON.parse(parsed.message);
+                        handleTvMessage(msg);
+                    }
+                } catch (err) {
+                    console.error('[Mobile] Erro ao processar mensagem da TV:', err);
+                }
+            };
+
+            eventSource.onerror = function () {
+                if (!isConnected) {
+                    updateStatus('connecting', 'Aguardando TV responder...');
+                }
+            };
         }
 
-        function connectToTv() {
-            if (!peer || !targetTvId) return;
-            if (isConnected) return;
+        function sendHandshake() {
+            sendToTv('HANDSHAKE', { pin: targetSecurityPin });
+        }
 
-            updateStatus('connecting', 'Conectando à TV' + (retryCount > 0 ? ' (' + retryCount + '/' + MAX_RETRIES + ')...' : '...'));
+        async function sendToTv(type, payload) {
+            if (!targetTvId) return;
+            const msg = JSON.stringify({
+                type: type,
+                payload: payload,
+                sent_at: Date.now()
+            });
 
             try {
-                if (tvConn) {
-                    try { tvConn.close(); } catch (e) {}
-                    tvConn = null;
-                }
-
-                tvConn = peer.connect(targetTvId, {
-                    reliable: true,
-                    serialization: 'json'
+                await fetch('https://ntfy.sh/' + encodeURIComponent(targetTvId), {
+                    method: 'POST',
+                    body: msg,
+                    headers: { 'Content-Type': 'text/plain' }
                 });
-
-                tvConn.on('open', function () {
-                    console.log('[Mobile] Conexão aberta com a TV! Enviando handshake...');
-                    retryCount = 0;
-                    clearTimeout(retryTimer);
-                    tvConn.send({
-                        type: 'HANDSHAKE',
-                        pin: targetSecurityPin
-                    });
-                });
-
-                tvConn.on('data', function (data) {
-                    handleTvMessage(data);
-                });
-
-                tvConn.on('close', function () {
-                    isConnected = false;
-                    updateStatus('disconnected', 'Desconectado da TV');
-                });
-
-                tvConn.on('error', function (err) {
-                    console.error('[Mobile] Erro tvConn:', err);
-                    isConnected = false;
-                    if (retryCount < MAX_RETRIES) {
-                        retryCount++;
-                        updateStatus('connecting', 'Aguardando TV... Retentando em 2s (' + retryCount + '/' + MAX_RETRIES + ')');
-                        clearTimeout(retryTimer);
-                        retryTimer = setTimeout(connectToTv, 2000);
-                    } else {
-                        updateStatus('disconnected', 'Falha ao parear: Verifique se a tela está aberta na TV');
-                    }
-                });
-            } catch (e) {
-                updateStatus('disconnected', 'Erro de conexão: ' + e.message);
+            } catch (err) {
+                console.error('[Mobile] Erro ao enviar mensagem para TV:', err);
             }
         }
 
@@ -941,20 +906,24 @@
             switch (msg.type) {
                 case 'HANDSHAKE_OK':
                     isConnected = true;
+                    if (handshakeInterval) clearInterval(handshakeInterval);
                     updateStatus('connected', '🟢 Conectado à TV');
-                    showToast('Pareamento com a TV confirmado!');
+                    showToast('Pareamento confirmado com a Smart TV!');
                     document.getElementById('connect-card').style.display = 'none';
                     break;
 
                 case 'HANDSHAKE_FAILED':
                     isConnected = false;
+                    if (handshakeInterval) clearInterval(handshakeInterval);
                     updateStatus('disconnected', 'PIN incorreto');
                     showToast('PIN de segurança incorreto na TV');
                     document.getElementById('connect-card').style.display = 'block';
                     break;
 
                 case 'SNAPSHOT':
-                    // Dados completos recebidos da TV
+                    isConnected = true;
+                    if (handshakeInterval) clearInterval(handshakeInterval);
+                    updateStatus('connected', '🟢 Conectado à TV');
                     tvData = msg.payload || {};
                     populateFormWithSnapshot();
                     break;
@@ -963,17 +932,6 @@
                     showToast(msg.message || 'Comando executado na TV!');
                     break;
             }
-        }
-
-        function sendToTv(type, payload) {
-            if (!tvConn || !isConnected) {
-                showToast('TV não conectada');
-                return;
-            }
-            tvConn.send({
-                type: type,
-                payload: payload
-            });
         }
 
         function updateStatus(state, text) {
@@ -1185,4 +1143,3 @@
     </script>
 </body>
 </html>
-
