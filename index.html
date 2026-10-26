@@ -691,7 +691,8 @@
                 sendToTv('UPDATE_SERVER', {
                     server: srv,
                     username: usr,
-                    password: pwd
+                    password: pwd,
+                    backupServers: (tvData.config && Array.isArray(tvData.config.backupServers)) ? tvData.config.backupServers : []
                 });
                 showToast('Credenciais enviadas para a TV!');
             });
@@ -1094,13 +1095,15 @@
             }
             const backupObject = {
                 app: "IPTV Lite Samsung Tizen",
-                version: 1,
+                version: 2,
                 exported_at: new Date().toISOString(),
                 config: tvData.config || {},
                 settings: tvData.settings || {},
                 hidden_categories: tvData.hidden_categories || [],
                 custom_qualities: tvData.custom_qualities || {},
-                favorites: tvData.favorites || []
+                favorites: tvData.favorites || [],
+                vod_favorites: tvData.vod_favorites || [],
+                series_favorites: tvData.series_favorites || []
             };
 
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObject, null, 2));
@@ -1131,14 +1134,19 @@
                     const summaryBox = document.getElementById('import-summary-box');
                     const summaryText = document.getElementById('import-summary-text');
                     const favCount = Array.isArray(parsed.favorites) ? parsed.favorites.length : 0;
+                    const vodFavCount = Array.isArray(parsed.vod_favorites) ? parsed.vod_favorites.length : 0;
+                    const seriesFavCount = Array.isArray(parsed.series_favorites) ? parsed.series_favorites.length : 0;
                     const hiddenCount = Array.isArray(parsed.hidden_categories) ? parsed.hidden_categories.length : 0;
                     const customQCount = parsed.custom_qualities ? Object.keys(parsed.custom_qualities).length : 0;
                     const serverUrl = parsed.config && parsed.config.server ? parsed.config.server : 'Não incluso';
+                    const backupServersCount = (parsed.config && Array.isArray(parsed.config.backupServers)) ? parsed.config.backupServers.length : 0;
 
                     summaryText.innerHTML = `
                         • Versão do Backup: ${parsed.version || 1}<br>
-                        • Servidor: <strong>${serverUrl}</strong><br>
-                        • Favoritos: <strong>${favCount}</strong><br>
+                        • Servidor Principal: <strong>${serverUrl}</strong>${backupServersCount > 0 ? ' (' + backupServersCount + ' backup(s))' : ''}<br>
+                        • Favoritos TV ao Vivo: <strong>${favCount}</strong><br>
+                        • Favoritos Filmes: <strong>${vodFavCount}</strong><br>
+                        • Favoritos Séries: <strong>${seriesFavCount}</strong><br>
                         • Categorias Ocultas: <strong>${hiddenCount}</strong><br>
                         • Canais com Resolução Personalizada: <strong>${customQCount}</strong>
                     `;
