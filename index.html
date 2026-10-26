@@ -282,6 +282,33 @@
             padding: 4px;
         }
 
+        /* Servidores de Backup */
+        .web-backup-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .web-backup-input {
+            flex: 1;
+        }
+
+        .btn-remove-web-backup {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-remove-web-backup:hover {
+            background-color: rgba(239, 68, 68, 0.4);
+        }
+
         /* Botões */
         .btn {
             display: inline-flex;
@@ -502,6 +529,15 @@
                     <input type="text" id="srv-url" class="form-input" placeholder="http://exemplo.site:80" autocomplete="off" spellcheck="false">
                 </div>
 
+                <!-- Servidores de Backup -->
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label class="form-label" style="margin-bottom: 0;">Servidores de Backup (Opcional)</label>
+                        <button type="button" id="btn-add-web-backup" class="btn btn-secondary" style="width: auto; padding: 6px 12px; font-size: 13px;">+ Adicionar Backup</button>
+                    </div>
+                    <div id="web-backup-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                </div>
+
                 <div class="form-group">
                     <label class="form-label">Nome de Usuário</label>
                     <input type="text" id="srv-user" class="form-input" placeholder="Seu usuário" autocomplete="off" spellcheck="false">
@@ -604,6 +640,7 @@
         };
 
         let parsedImportBackup = null;
+        let webBackupServers = [];
 
         // Inicialização
         window.onload = function () {
@@ -673,6 +710,12 @@
                 startChannelConnection();
             });
 
+            // Adicionar Servidor de Backup
+            const btnAddBackup = document.getElementById('btn-add-web-backup');
+            if (btnAddBackup) {
+                btnAddBackup.addEventListener('click', addWebBackupServer);
+            }
+
             // Salvar Servidor na TV
             document.getElementById('btn-save-server').addEventListener('click', function () {
                 if (!isConnected) {
@@ -688,13 +731,22 @@
                     return;
                 }
 
+                const backupInputs = document.querySelectorAll('.web-backup-input');
+                const validBackups = [];
+                backupInputs.forEach(function (inp) {
+                    const val = inp.value.trim().replace(/\/+$/, '');
+                    if (val && validBackups.indexOf(val) === -1 && val !== srv) {
+                        validBackups.push(val);
+                    }
+                });
+
                 sendToTv('UPDATE_SERVER', {
                     server: srv,
                     username: usr,
                     password: pwd,
-                    backupServers: (tvData.config && Array.isArray(tvData.config.backupServers)) ? tvData.config.backupServers : []
+                    backupServers: validBackups
                 });
-                showToast('Credenciais enviadas para a TV!');
+                showToast('Credenciais e backups enviados para a TV!');
             });
 
             // Testar Servidor no Celular
@@ -958,9 +1010,59 @@
                 document.getElementById('srv-url').value = tvData.config.server || '';
                 document.getElementById('srv-user').value = tvData.config.username || '';
                 document.getElementById('srv-pass').value = tvData.config.password || '';
+                webBackupServers = (Array.isArray(tvData.config.backupServers)) ? tvData.config.backupServers.slice() : [];
             }
+            renderWebBackupServers();
             renderCategoriesList();
             renderSyncOverview();
+        }
+
+        function renderWebBackupServers() {
+            const container = document.getElementById('web-backup-list');
+            if (!container) return;
+            container.innerHTML = '';
+
+            webBackupServers.forEach(function (url, idx) {
+                const row = document.createElement('div');
+                row.className = 'web-backup-row';
+
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.className = 'form-input web-backup-input';
+                inp.placeholder = 'http://backup' + (idx + 1) + '.com:porta';
+                inp.value = url || '';
+                inp.setAttribute('data-backup-index', idx);
+                inp.addEventListener('input', function (e) {
+                    webBackupServers[idx] = e.target.value;
+                });
+
+                const btnDel = document.createElement('button');
+                btnDel.type = 'button';
+                btnDel.className = 'btn-remove-web-backup';
+                btnDel.textContent = '✕';
+                btnDel.title = 'Remover este servidor de backup';
+                btnDel.addEventListener('click', function () {
+                    removeWebBackupServer(idx);
+                });
+
+                row.appendChild(inp);
+                row.appendChild(btnDel);
+                container.appendChild(row);
+            });
+        }
+
+        function addWebBackupServer() {
+            webBackupServers.push('');
+            renderWebBackupServers();
+            const inputs = document.querySelectorAll('.web-backup-input');
+            if (inputs.length > 0) inputs[inputs.length - 1].focus();
+        }
+
+        function removeWebBackupServer(idx) {
+            if (idx >= 0 && idx < webBackupServers.length) {
+                webBackupServers.splice(idx, 1);
+                renderWebBackupServers();
+            }
         }
 
         function renderSyncOverview() {
