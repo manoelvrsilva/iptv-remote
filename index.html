@@ -627,6 +627,7 @@
         let isConnected = false;
         let targetTvId = '';
         let targetSecurityPin = '';
+        let targetSecretKey = '';
         let handshakeInterval = null;
 
         // Snapshot sincronizado da TV
@@ -656,6 +657,7 @@
             const urlParams = new URLSearchParams(window.location.search);
             const idParam = urlParams.get('id') || urlParams.get('channel');
             const pinParam = urlParams.get('pin');
+            const keyParam = urlParams.get('key');
 
             if (idParam) {
                 targetTvId = idParam.trim();
@@ -664,6 +666,15 @@
             if (pinParam) {
                 targetSecurityPin = pinParam.trim();
                 document.getElementById('input-session-pin').value = targetSecurityPin;
+            }
+            if (keyParam) {
+                targetSecretKey = keyParam.trim();
+            }
+
+            // Remove PIN e chave secreta da barra de endereços por segurança
+            if (targetTvId && (pinParam || keyParam) && window.history && window.history.replaceState) {
+                const cleanUrl = window.location.pathname + '?id=' + encodeURIComponent(targetTvId);
+                window.history.replaceState({}, document.title, cleanUrl);
             }
 
             if (!targetTvId) {
@@ -701,8 +712,13 @@
 
             // Conexão manual
             document.getElementById('btn-manual-connect').addEventListener('click', function () {
-                targetTvId = document.getElementById('input-session-id').value.trim();
-                targetSecurityPin = document.getElementById('input-session-pin').value.trim();
+                const enteredId = document.getElementById('input-session-id').value.trim();
+                const enteredPin = document.getElementById('input-session-pin').value.trim();
+                if (enteredId !== targetTvId) {
+                    targetSecretKey = '';
+                }
+                targetTvId = enteredId;
+                targetSecurityPin = enteredPin;
                 if (!targetTvId) {
                     showToast('Digite o ID da sessão da TV');
                     return;
@@ -898,6 +914,176 @@
             }
         }
 
+        // -------------------------------------------------------------
+        // Criptografia Ponta a Ponta (E2EE)
+        // -------------------------------------------------------------
+        function generateRandomHex(byteLen) {
+            var bytes = new Uint8Array(byteLen);
+            var cryptoObj = window.crypto || window.msCrypto;
+            if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+                cryptoObj.getRandomValues(bytes);
+            } else {
+                for (var k = 0; k < byteLen; k++) {
+                    bytes[k] = Math.floor(Math.random() * 256);
+                }
+            }
+            var hex = '';
+            for (var i = 0; i < bytes.length; i++) {
+                var h = bytes[i].toString(16);
+                hex += (h.length === 1 ? '0' : '') + h;
+            }
+            return hex;
+        }
+
+        function utf8ToBytes(str) {
+            var bin = unescape(encodeURIComponent(String(str)));
+            var arr = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) {
+                arr[i] = bin.charCodeAt(i) & 0xff;
+            }
+            return arr;
+        }
+
+        function bytesToUtf8(bytes) {
+            var bin = '';
+            var CHUNK = 0x4000;
+            for (var i = 0; i < bytes.length; i += CHUNK) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+            }
+            return decodeURIComponent(escape(bin));
+        }
+
+        function bytesToBase64(bytes) {
+            var bin = '';
+            var CHUNK = 0x4000;
+            for (var i = 0; i < bytes.length; i += CHUNK) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+            }
+            return btoa(bin);
+        }
+
+        function base64ToBytes(b64) {
+            var bin = atob(b64);
+            var arr = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) {
+                arr[i] = bin.charCodeAt(i) & 0xff;
+            }
+            return arr;
+        }
+
+        function e2eeInitState(seedStr) {
+            var keyBytes = utf8ToBytes(seedStr);
+            var kLen = keyBytes.length || 1;
+            var S = new Uint8Array(256);
+            var i, j = 0, tmp;
+            for (i = 0; i < 256; i++) S[i] = i;
+            for (var round = 0; round < 2; round++) {
+                for (i = 0; i < 256; i++) {
+                    j = (j + S[i] + keyBytes[i % kLen]) & 0xff;
+                    tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+                }
+            }
+            i = 0; j = 0;
+            for (var d = 0; d < 768; d++) {
+                i = (i + 1) & 0xff;
+                j = (j + S[i]) & 0xff;
+                tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+            }
+            return { S: S, i: i, j: j };
+        }
+
+        function e2eeXorBytes(dataBytes, keyStr, ivHex) {
+            var st = e2eeInitState('ENC|' + keyStr + '|' + ivHex);
+            var S = st.S, i = st.i, j = st.j, tmp;
+            var out = new Uint8Array(dataBytes.length);
+            for (var n = 0; n < dataBytes.length; n++) {
+                i = (i + 1) & 0xff;
+                j = (j + S[i]) & 0xff;
+                tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+                out[n] = dataBytes[n] ^ S[(S[i] + S[j]) & 0xff];
+            }
+            return out;
+        }
+
+        function e2eeComputeMac(ivHex, cipherB64, keyStr) {
+            var st = e2eeInitState('MAC|' + keyStr + '|' + ivHex);
+            var S = st.S, i = st.i, j = st.j, tmp;
+            var payload = String(cipherB64) + '|' + String(cipherB64.length);
+            for (var k = 0; k < payload.length; k++) {
+                i = (i + 1) & 0xff;
+                j = (j + S[i] + (payload.charCodeAt(k) & 0xff)) & 0xff;
+                tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+            }
+            for (var d = 0; d < 256; d++) {
+                i = (i + 1) & 0xff;
+                j = (j + S[i]) & 0xff;
+                tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+            }
+            var macHex = '';
+            for (var m = 0; m < 16; m++) {
+                i = (i + 1) & 0xff;
+                j = (j + S[i]) & 0xff;
+                tmp = S[i]; S[i] = S[j]; S[j] = tmp;
+                var b = S[(S[i] + S[j]) & 0xff];
+                var h = b.toString(16);
+                macHex += (h.length === 1 ? '0' : '') + h;
+            }
+            return macHex;
+        }
+
+        function constantTimeEqual(a, b) {
+            if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+            var diff = 0;
+            for (var i = 0; i < a.length; i++) {
+                diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+            }
+            return diff === 0;
+        }
+
+        function deriveRemoteKey(sessionId, pin, secretKey) {
+            return String(sessionId || '') + ':' + String(pin || '') + ':' + String(secretKey || '');
+        }
+
+        function encryptRemotePayload(bodyObj, customKeyStr) {
+            const isManual = !targetSecretKey;
+            const keyStr = customKeyStr || deriveRemoteKey(targetTvId, targetSecurityPin, targetSecretKey);
+            const iv = generateRandomHex(16);
+            const plainBytes = utf8ToBytes(JSON.stringify(bodyObj));
+            const cipherBytes = e2eeXorBytes(plainBytes, keyStr, iv);
+            const dataB64 = bytesToBase64(cipherBytes);
+            const mac = e2eeComputeMac(iv, dataB64, keyStr);
+            const env = {
+                _enc: 1,
+                iv: iv,
+                mac: mac,
+                data: dataB64
+            };
+            if (!customKeyStr && isManual) {
+                env._m = 1;
+            }
+            return env;
+        }
+
+        function decryptRemotePayload(envObj, customKeyStr) {
+            if (!envObj || envObj._enc !== 1 || typeof envObj.iv !== 'string' || typeof envObj.mac !== 'string' || typeof envObj.data !== 'string') {
+                return null;
+            }
+            try {
+                const keyStr = customKeyStr || deriveRemoteKey(targetTvId, targetSecurityPin, targetSecretKey);
+                const expectedMac = e2eeComputeMac(envObj.iv, envObj.data, keyStr);
+                if (!constantTimeEqual(expectedMac, envObj.mac)) {
+                    return null;
+                }
+                const cipherBytes = base64ToBytes(envObj.data);
+                const plainBytes = e2eeXorBytes(cipherBytes, keyStr, envObj.iv);
+                const jsonStr = bytesToUtf8(plainBytes);
+                return JSON.parse(jsonStr);
+            } catch (e) {
+                console.error('[Mobile E2EE] Falha ao decifrar payload:', e);
+                return null;
+            }
+        }
+
         function sendHandshake() {
             sendToTv('HANDSHAKE', { pin: targetSecurityPin });
         }
@@ -913,7 +1099,8 @@
         }
 
         async function sendRelayPayload(url, bodyObj) {
-            const rawString = JSON.stringify(bodyObj);
+            const encryptedEnvelope = (bodyObj && bodyObj._enc === 1) ? bodyObj : encryptRemotePayload(bodyObj);
+            const rawString = JSON.stringify(encryptedEnvelope);
             const CHUNK_SIZE = 2800; // Limite seguro abaixo de 4096 bytes do ntfy
 
             if (rawString.length <= CHUNK_SIZE) {
@@ -956,14 +1143,31 @@
         }
 
         function handleTvMessage(msg) {
+            if (!msg || msg._enc !== 1) {
+                console.warn('[Mobile] Mensagem da TV ignorada: sem criptografia E2EE');
+                return;
+            }
+
+            let decrypted = decryptRemotePayload(msg, deriveRemoteKey(targetTvId, targetSecurityPin, targetSecretKey));
+            if (!decrypted) {
+                const errNotice = decryptRemotePayload(msg, deriveRemoteKey(targetTvId, '', ''));
+                if (errNotice && errNotice.type === 'HANDSHAKE_FAILED') {
+                    decrypted = errNotice;
+                } else {
+                    console.warn('[Mobile] Mensagem E2EE da TV rejeitada (MAC/chave inválida)');
+                    return;
+                }
+            }
+
+            msg = decrypted;
             if (!msg || !msg.type) return;
 
             switch (msg.type) {
                 case 'HANDSHAKE_OK':
                     isConnected = true;
                     if (handshakeInterval) clearInterval(handshakeInterval);
-                    updateStatus('connected', '🟢 Conectado à TV');
-                    showToast('Pareamento confirmado com a Smart TV!');
+                    updateStatus('connected', '🔒 Conectado à TV (E2EE)');
+                    showToast('Pareamento E2EE confirmado com a Smart TV!');
                     document.getElementById('connect-card').style.display = 'none';
                     if (msg.payload) {
                         tvData = msg.payload;
@@ -976,15 +1180,15 @@
                 case 'HANDSHAKE_FAILED':
                     isConnected = false;
                     if (handshakeInterval) clearInterval(handshakeInterval);
-                    updateStatus('disconnected', 'PIN incorreto');
-                    showToast('PIN de segurança incorreto na TV');
+                    updateStatus('disconnected', 'PIN/chave incorretos');
+                    showToast(msg.message || 'PIN de segurança incorreto na TV');
                     document.getElementById('connect-card').style.display = 'block';
                     break;
 
                 case 'SNAPSHOT':
                     isConnected = true;
                     if (handshakeInterval) clearInterval(handshakeInterval);
-                    updateStatus('connected', '🟢 Conectado à TV');
+                    updateStatus('connected', '🔒 Conectado à TV (E2EE)');
                     tvData = msg.payload || {};
                     populateFormWithSnapshot();
                     break;
