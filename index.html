@@ -637,6 +637,8 @@
             hidden_categories: [],
             custom_qualities: {},
             favorites: [],
+            vod_favorites: [],
+            series_favorites: [],
             server_categories: []
         };
 
@@ -652,6 +654,16 @@
                 startChannelConnection();
             }
         };
+
+        function escapeHtml(str) {
+            if (str === undefined || str === null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
 
         function parseUrlParams() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -1278,7 +1290,9 @@
             }
             if (statFavs) {
                 const favCount = Array.isArray(tvData.favorites) ? tvData.favorites.length : 0;
-                statFavs.textContent = favCount + ' canais salvos';
+                const vodFavCount = Array.isArray(tvData.vod_favorites) ? tvData.vod_favorites.length : 0;
+                const seriesFavCount = Array.isArray(tvData.series_favorites) ? tvData.series_favorites.length : 0;
+                statFavs.textContent = favCount + ' TV • ' + vodFavCount + ' Filmes • ' + seriesFavCount + ' Séries';
             }
             if (statCats) {
                 const catCount = Array.isArray(tvData.server_categories) ? tvData.server_categories.length : 0;
@@ -1303,12 +1317,15 @@
             let html = '';
             cats.forEach(function (c) {
                 const cid = String(c.category_id);
+                const safeCid = escapeHtml(cid);
+                const safeName = escapeHtml(c.category_name || ('Cat ' + cid));
+                const safeNameAttr = escapeHtml((c.category_name || '').toLowerCase());
                 const isChecked = !hidden.includes(cid);
                 html += `
-                    <div class="cat-item-row" data-name="${(c.category_name || '').toLowerCase()}" data-id="${cid}">
-                        <span class="cat-item-name">${c.category_name || ('Cat ' + cid)}</span>
+                    <div class="cat-item-row" data-name="${safeNameAttr}" data-id="${safeCid}">
+                        <span class="cat-item-name">${safeName}</span>
                         <label class="switch">
-                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="onCategoryToggle('${cid}', this.checked)">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} data-cid="${safeCid}" onchange="onCategoryToggle(this.getAttribute('data-cid'), this.checked)">
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -1448,8 +1465,8 @@
                     const backupServersCount = (parsed.config && Array.isArray(parsed.config.backupServers)) ? parsed.config.backupServers.length : 0;
 
                     summaryText.innerHTML = `
-                        • Versão do Backup: ${parsed.version || 1}<br>
-                        • Servidor Principal: <strong>${serverUrl}</strong>${backupServersCount > 0 ? ' (' + backupServersCount + ' backup(s))' : ''}<br>
+                        • Versão do Backup: ${escapeHtml(parsed.version || 1)}<br>
+                        • Servidor Principal: <strong>${escapeHtml(serverUrl)}</strong>${backupServersCount > 0 ? ' (' + backupServersCount + ' backup(s))' : ''}<br>
                         • Favoritos TV ao Vivo: <strong>${favCount}</strong><br>
                         • Favoritos Filmes: <strong>${vodFavCount}</strong><br>
                         • Favoritos Séries: <strong>${seriesFavCount}</strong><br>
